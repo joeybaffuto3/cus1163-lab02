@@ -1,140 +1,212 @@
 #include "proc_reader.h"
 
-int list_process_directories(void) {
-    // TODO: Open the /proc directory using opendir()
-    // TODO: Check if opendir() failed and print error message
+/* We already have stdio, stdlib, string, unistd, dirent, fcntl, ctype
+ * included from proc_reader.h
+ */
 
-    // TODO: Declare a struct dirent pointer for directory entries
-    // TODO: Initialize process counter to 0
+/* ---------- Helper: check if string is all digits ---------- */
+int is_number(const char* str) {
+    if (str == NULL || *str == '\0') return 0;
 
-    printf("Process directories in /proc:\n");
-    printf("%-8s %-20s\n", "PID", "Type");
-    printf("%-8s %-20s\n", "---", "----");
-
-    // TODO: Read directory entries using readdir() in a loop
-    // TODO: For each entry, check if the name is a number using is_number()
-    // TODO: If it's a number, print it as a PID and increment counter
-
-    // TODO: Close the directory using closedir()
-    // TODO: Check if closedir() failed
-
-    // TODO: Print the total count of process directories found
-
-    return 0; // Replace with proper error handling
+    const unsigned char* p = (const unsigned char*)str;
+    while (*p) {
+        if (!isdigit(*p)) return 0;
+        p++;
+    }
+    return 1;
 }
 
-int read_process_info(const char* pid) {
-    char filepath[256];
+/* ---------- Helper: print first n lines of a file ---------- */
+static void print_first_n_lines(const char *path, int n) {
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        perror("fopen");
+        return;
+    }
 
-    // TODO: Create the path to /proc/[pid]/status using snprintf()
+    char line[512];
+    int count = 0;
+    while (count < n && fgets(line, sizeof(line), f) != NULL) {
+        printf("%s", line);
+        count++;
+    }
 
-    printf("\n--- Process Information for PID %s ---\n", pid);
+    fclose(f);
+}
 
-    // TODO: Call read_file_with_syscalls() to read the status file
-    // TODO: Check if the function succeeded
+/* ---------- Option 1: List process directories ---------- */
 
-    // TODO: Create the path to /proc/[pid]/cmdline using snprintf()
+int list_process_directories(void) {
+    DIR *dir = opendir("/proc");
+    if (!dir) {
+        perror("opendir");
+        return -1;
+    }
+
+    printf("Listing all process directories in /proc...\n");
+    printf("PID      Type\n");
+    printf("---      ----\n");
+
+    struct dirent *entry;
+    int count = 0;
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (is_number(entry->d_name)) {
+            printf("%-8s process\n", entry->d_name);
+            count++;
+        }
+    }
+
+    closedir(dir);
+
+    printf("Found %d process directories\n", count);
+    printf("SUCCESS: Process directories listed!\n");
+    return 0;
+}
+
+/* ---------- Option 2: Read process information ---------- */
+
+int read_process_info(const char* pid_str) {
+    int pid = atoi(pid_str);
+
+    char status_path[256];
+    char cmdline_path[256];
+
+    snprintf(status_path, sizeof(status_path), "/proc/%d/status", pid);
+    snprintf(cmdline_path, sizeof(cmdline_path), "/proc/%d/cmdline", pid);
+
+    printf("Reading information for PID %d...\n\n", pid);
+
+    FILE *status = fopen(status_path, "r");
+    if (!status) {
+        perror("fopen status");
+        return -1;
+    }
+
+    printf("--- Process Information for PID %d ---\n", pid);
+
+    char line[512];
+    const char *keys[] = {
+        "Name:", "Umask:", "State:", "Tgid:", "Ngid:",
+        "Pid:", "PPid:", "TracerPid:", "Uid:", "Gid:"
+    };
+    size_t num_keys = sizeof(keys)/sizeof(keys[0]);
+
+    while (fgets(line, sizeof(line), status) != NULL) {
+        for (size_t i = 0; i < num_keys; i++) {
+            if (strncmp(line, keys[i], strlen(keys[i])) == 0) {
+                printf("%s", line);
+                break;
+            }
+        }
+    }
+
+    fclose(status);
 
     printf("\n--- Command Line ---\n");
 
-    // TODO: Call read_file_with_syscalls() to read the cmdline file
-    // TODO: Check if the function succeeded
+    int fd = open(cmdline_path, O_RDONLY);
+    if (fd >= 0) {
+        char buf[1024];
+        ssize_t bytes;
 
-    printf("\n"); // Add extra newline for readability
+        while ((bytes = read(fd, buf, sizeof(buf))) > 0) {
+            for (ssize_t i = 0; i < bytes; i++) {
+                if (buf[i] == '\0') buf[i] = ' ';
+            }
+            buf[bytes] = '\0';
+            printf("%s", buf);
+        }
 
-    return 0; // Replace with proper error handling
+        printf("\n");
+        close(fd);
+    } else {
+        perror("open cmdline");
+    }
+
+    printf("SUCCESS: Process information read!\n");
+    return 0;
 }
+
+/* ---------- Option 3: Show system information ---------- */
 
 int show_system_info(void) {
-    int line_count = 0;
-    const int MAX_LINES = 10;
+    printf("Reading system information...\n\n");
 
-    printf("\n--- CPU Information (first %d lines) ---\n", MAX_LINES);
+    printf("--- CPU Information (first 10 lines) ---\n");
+    print_first_n_lines("/proc/cpuinfo", 10);
+    printf("\n");
 
-    // TODO: Open /proc/cpuinfo using fopen() with "r" mode
-    // TODO: Check if fopen() failed
+    printf("--- Memory Information (first 10 lines) ---\n");
+    print_first_n_lines("/proc/meminfo", 10);
 
-    // TODO: Declare a char array for reading lines
-    // TODO: Read lines using fgets() in a loop, limit to MAX_LINES
-    // TODO: Print each line
-    // TODO: Close the file using fclose()
-
-    printf("\n--- Memory Information (first %d lines) ---\n", MAX_LINES);
-
-    // TODO: Open /proc/meminfo using fopen() with "r" mode
-    // TODO: Check if fopen() failed
-
-    // TODO: Read lines using fgets() in a loop, limit to MAX_LINES
-    // TODO: Print each line
-    // TODO: Close the file using fclose()
-
-    return 0; // Replace with proper error handling
+    printf("SUCCESS: System information displayed!\n");
+    return 0;
 }
 
-void compare_file_methods(void) {
-    const char* test_file = "/proc/version";
-
-    printf("Comparing file reading methods for: %s\n\n", test_file);
-
-    printf("=== Method 1: Using System Calls ===\n");
-    read_file_with_syscalls(test_file);
-
-    printf("\n=== Method 2: Using Library Functions ===\n");
-    read_file_with_library(test_file);
-
-    printf("\nNOTE: Run this program with strace to see the difference!\n");
-    printf("Example: strace -e trace=openat,read,write,close ./lab2\n");
-}
+/* ---------- Helper: read file using raw system calls ---------- */
 
 int read_file_with_syscalls(const char* filename) {
-    // TODO: Declare variables: file descriptor (int), buffer (char array), bytes_read (ssize_t)
+    int fd = open(filename, O_RDONLY);
+    if (fd < 0) {
+        perror("open");
+        return -1;
+    }
 
-    // TODO: Open the file using open() with O_RDONLY flag
+    char buf[1024];
+    ssize_t bytes;
 
-    // TODO: Check if open() failed (fd == -1) and return -1
+    while ((bytes = read(fd, buf, sizeof(buf))) > 0) {
+        if (write(STDOUT_FILENO, buf, bytes) < 0) {
+            perror("write");
+            close(fd);
+            return -1;
+        }
+    }
 
-    // TODO: Read the file in a loop using read()
-    // TODO: Use sizeof(buffer) - 1 for buffer size to leave space for null terminator
-    // TODO: Check if read() returns > 0 (data was read)
-    // TODO: Null-terminate the buffer after each read
-    // TODO: Print each chunk of data read
+    if (bytes < 0) {
+        perror("read");
+        close(fd);
+        return -1;
+    }
 
-    // TODO: Handle read() errors (return value -1)
-    // TODO: If read() fails, close the file and return -1
-
-    // TODO: Close the file using close()
-    // TODO: Check if close() failed
-
-    return 0; // Replace with proper error handling
+    close(fd);
+    return 0;
 }
+
+/* ---------- Helper: read file using stdio library ---------- */
 
 int read_file_with_library(const char* filename) {
-    // TODO: Declare variables: FILE pointer, buffer (char array)
+    FILE *f = fopen(filename, "r");
+    if (!f) {
+        perror("fopen");
+        return -1;
+    }
 
-    // TODO: Open the file using fopen() with "r" mode
+    char line[512];
+    while (fgets(line, sizeof(line), f) != NULL) {
+        printf("%s", line);
+    }
 
-    // TODO: Check if fopen() failed and return -1
-
-    // TODO: Read the file using fgets() in a loop
-    // TODO: Continue until fgets() returns NULL
-    // TODO: Print each line read
-
-    // TODO: Close the file using fclose()
-    // TODO: Check if fclose() failed
-
-    return 0; // Replace with proper error handling
+    fclose(f);
+    return 0;
 }
 
-int is_number(const char* str) {
-    // TODO: Handle empty strings - check if str is NULL or empty
-    // TODO: Return 0 for empty strings
+/* ---------- Option 4: Compare file methods ---------- */
 
-    // TODO: Check if the string contains only digits
-    // TODO: Loop through each character using a while loop
-    // TODO: Use isdigit() function to check each character
-    // TODO: If any character is not a digit, return 0
+void compare_file_methods(void) {
+    const char *filename = "/proc/version";
 
-    // TODO: Return 1 if all characters are digits
+    printf("Comparing file operation methods...\n");
+    printf("Comparing file reading methods for: %s\n\n", filename);
 
-    return 0; // Replace with actual implementation
+    printf("=== Method 1: Using System Calls ===\n");
+    read_file_with_syscalls(filename);
+    printf("\n\n");
+
+    printf("=== Method 2: Using Library Functions ===\n");
+    read_file_with_library(filename);
+    printf("\n");
+
+    printf("\nNOTE: Run with strace to compare syscalls.\n");
 }
